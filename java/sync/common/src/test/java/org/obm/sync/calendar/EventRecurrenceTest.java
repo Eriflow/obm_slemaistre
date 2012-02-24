@@ -330,4 +330,5 @@ public class EventRecurrenceTest {
 	private boolean isOrganizer(int id) {
 		return id == 0 ? true : false;
 	}
+
 }

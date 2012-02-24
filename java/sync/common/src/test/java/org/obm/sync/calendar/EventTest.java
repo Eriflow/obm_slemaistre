@@ -519,7 +519,7 @@ public class EventTest {
 	}
 	
 	@Test
-	public void getEventInstanceWithRecurrenceIdWithoutExistedException(){
+	public void getOccurrenceWithoutException(){
 		Event ev1 = createOneEvent(3);
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(ev1.getDate());
@@ -532,7 +532,7 @@ public class EventTest {
 		recurrence.setFrequence(1);
 		ev1.setRecurrence(recurrence);
 		
-		Event instance = ev1.getEventInstanceWithRecurrenceId(recurrenceId);
+		Event instance = ev1.getOccurrence(recurrenceId);
 		
 		Assert.assertNotNull(instance);
 		Assert.assertEquals(recurrenceId, instance.getDate());
@@ -541,7 +541,7 @@ public class EventTest {
 	}
 	
 	@Test
-	public void getEventInstanceWithRecurrenceIdWithException(){
+	public void getOccurrenceWithException(){
 		Calendar cal = Calendar.getInstance();
 		cal.set(2012, 12, 12);
 		Date recurrenceId = cal.getTime();
@@ -555,8 +555,8 @@ public class EventTest {
 		recurrence.addEventException(exception);		
 		ev1.setRecurrence(recurrence);
 
-		Event instance = ev1.getEventInstanceWithRecurrenceId(recurrenceId);
-		
+		Event instance = ev1.getOccurrence(recurrenceId);
+
 		Assert.assertNotNull(instance);
 		Assert.assertEquals(exception, instance);
 	}
@@ -566,7 +566,18 @@ public class EventTest {
 		Event ev1 = createOneEvent(1);
 		Assert.assertFalse(ev1.isRecurrent());
 	}
-	
+
+	@Test
+	public void testAddEventException() {
+		Event parent = new Event();
+		parent.setRecurrence(new EventRecurrence());
+		Event eventException = createOneEvent(1);
+		parent.addEventException(eventException);
+
+		EventRecurrence parentEventRecurrence = parent.getRecurrence();
+		Assertions.assertThat(parentEventRecurrence.getEventExceptions()).containsOnly(eventException);
+	}
+
 	private Event createOneEvent(int nbAttendees) {
 		Date currentDate = new Date();
 		Event event = new Event();

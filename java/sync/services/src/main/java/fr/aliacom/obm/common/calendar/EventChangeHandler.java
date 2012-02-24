@@ -66,7 +66,7 @@ public class EventChangeHandler {
 		} else {
 			List<Event> exceptionWithChanges = current.getEventExceptionsWithChanges(previous);
 			for (Event exception: exceptionWithChanges) {
-				Event previousException = previous.getEventInstanceWithRecurrenceId(exception.getRecurrenceId());
+				Event previousException = previous.getOccurrence(exception.getRecurrenceId());
 				update(notification, token, previousException, exception);
 			}
 		}
