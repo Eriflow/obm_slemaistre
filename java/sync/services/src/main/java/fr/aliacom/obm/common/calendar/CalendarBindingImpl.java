@@ -370,7 +370,7 @@ public class CalendarBindingImpl implements ICalendar {
 
 	}
 	
-	private Event loadCurrentEvent(AccessToken token, ObmUser calendarUser, Event event) throws EventNotFoundException, ServerFault {
+	@VisibleForTesting protected Event loadCurrentEvent(AccessToken token, ObmUser calendarUser, Event event) throws EventNotFoundException, ServerFault {
 		if (event.getObmId() == null && event.getExtId() != null && event.getExtId().getExtId() != null) {
 			final Event currentEvent = calendarDao.findEventByExtId(token, calendarUser, event.getExtId());
 			if (currentEvent != null) {

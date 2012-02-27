@@ -456,6 +456,73 @@ public class CalendarBindingImplTest {
 	}
 
 	@Test
+	public void testModifyNullEvent() throws ServerFault {
+
+		ObmUser defaultObmUser = ToolBox.getDefaultObmUser();
+		String calendar = "cal1";
+
+		CalendarBindingImpl calendarService = new CalendarBindingImpl(null, null, null, null, null, null, null, null);
+		AccessToken accessToken = ToolBox.mockAccessToken(defaultObmUser.getLogin(), defaultObmUser.getDomain());
+
+		EasyMock.replay(accessToken);
+
+		Event modifiedEvent = calendarService.modifyEvent(accessToken, calendar, null, false, false);
+
+		Assertions.assertThat(modifiedEvent).isNull();
+	}
+
+	@Test
+	public void testModifyNotExistingEvent() throws FindException, EventNotFoundException, ServerFault {
+
+		ObmUser defaultObmUser = ToolBox.getDefaultObmUser();
+		String calendar = "cal1";
+		Event event = new Event();
+
+		AccessToken accessToken = ToolBox.mockAccessToken(defaultObmUser.getLogin(), defaultObmUser.getDomain());
+
+		final UserService userService = createMock(UserService.class);
+		expect(userService.getUserFromCalendar(calendar, defaultObmUser.getDomain().getName())).andReturn(defaultObmUser)
+						.once();
+		CalendarDao calendarDao = createMock(CalendarDao.class);
+
+		CalendarBindingImpl calendarService = new CalendarBindingImpl(null, null, userService, calendarDao, null, null, null, null);
+		expect(calendarService.loadCurrentEvent(accessToken, defaultObmUser, event)).andReturn(null).once();
+
+		EasyMock.replay(accessToken, userService, calendarDao);
+
+		Event modifiedEvent = calendarService.modifyEvent(accessToken, calendar, event, false, false);
+		Assertions.assertThat(modifiedEvent).isNull();
+	}
+
+	@Test
+	public void testToModifyEventWithoutWriteRightOnCalendar() throws FindException, EventNotFoundException, ServerFault {
+		ObmUser defaultObmUser = ToolBox.getDefaultObmUser();
+		String calendar = "cal1";
+		Event event = new Event();
+		event.setOwner(defaultObmUser.getEmail());
+
+		AccessToken accessToken = ToolBox.mockAccessToken(defaultObmUser.getLogin(), defaultObmUser.getDomain());
+
+		final UserService userService = createMock(UserService.class);
+		expect(userService.getUserFromCalendar(calendar, defaultObmUser.getDomain().getName())).andReturn(defaultObmUser)
+						.once();
+
+		CalendarDao calendarDao = createMock(CalendarDao.class);
+
+		HelperService rightsHelper = createMock(HelperService.class);
+		expect(rightsHelper.canWriteOnCalendar(accessToken, defaultObmUser.getEmail()))
+				.andReturn(false).once();
+
+		CalendarBindingImpl calendarService = new CalendarBindingImpl(null, null, userService, calendarDao, null, rightsHelper, null, null);
+		expect(calendarService.loadCurrentEvent(accessToken, defaultObmUser, event)).andReturn(event).once();
+
+		EasyMock.replay(accessToken, userService, calendarDao, rightsHelper);
+
+		Event modifiedEvent = calendarService.modifyEvent(accessToken, calendar, event, false, false);
+		Assertions.assertThat(modifiedEvent).isEqualTo(event);
+	}
+
+	@Test
 	public void testAttendeeHasRightToWriteOnCalendar() throws FindException, ServerFault, SQLException, EventNotFoundException {
 		ObmUser defaultUser = ToolBox.getDefaultObmUser();
 		
@@ -508,6 +575,64 @@ public class CalendarBindingImplTest {
 		
 		Assert.assertEquals(1, event.getAttendees().size());
 		Assert.assertEquals(true, event.getAttendees().iterator().next().isCanWriteOnCalendar());
+	}
+
+	@Test
+	public void testAttendeeHasNoRightToWriteOnCalendar() throws FindException, ServerFault, SQLException, EventNotFoundException {
+		ObmUser defaultUser = ToolBox.getDefaultObmUser();
+
+		String calendar = "cal1";
+		EventExtId extId = new EventExtId("extId");
+		boolean updateAttendee = true;
+		boolean notification = false;
+
+		Attendee attendee = ToolBox.getFakeAttendee(defaultUser.getEmail());
+		attendee.setState(ParticipationState.ACCEPTED);
+
+		Event beforeEvent = new Event();
+		beforeEvent.setType(EventType.VEVENT);
+		beforeEvent.setInternalEvent(true);
+		beforeEvent.setExtId(extId);
+		beforeEvent.setSequence(0);
+
+		Event event = new Event();
+		event.setType(EventType.VEVENT);
+		event.setInternalEvent(true);
+		event.setExtId(extId);
+		event.addAttendee(attendee);
+		event.setLocation("aLocation");
+		event.setSequence(1);
+
+		AccessToken accessToken = ToolBox.mockAccessToken(calendar, defaultUser.getDomain());
+		HelperService helper = mockRightsHelper(calendar, accessToken);
+		CalendarDao calendarDao = createMock(CalendarDao.class);
+		UserService userService = createMock(UserService.class);
+		EventChangeHandler eventChangeHandler = createMock(EventChangeHandler.class);
+
+		expect(userService.getUserFromCalendar(calendar, defaultUser.getDomain().getName())).andReturn(defaultUser)
+				.atLeastOnce();
+		expect(calendarDao.findEventByExtId(accessToken, defaultUser, event.getExtId())).andReturn(
+				beforeEvent).atLeastOnce();
+		expect(helper.canWriteOnCalendar(accessToken, attendee.getEmail())).andReturn(false)
+				.atLeastOnce();
+		expect(
+				calendarDao.modifyEventForcingSequence(accessToken, calendar, event,
+						updateAttendee, 1, true)).andReturn(event).atLeastOnce();
+
+		eventChangeHandler.update(beforeEvent, event, notification, accessToken);
+		EasyMock.expectLastCall();
+
+		EasyMock.replay(accessToken, helper, calendarDao, userService, eventChangeHandler);
+
+		CalendarBindingImpl calendarService = new CalendarBindingImpl(eventChangeHandler, null,
+				userService, calendarDao, null, helper, null, null);
+		Event newEvent = calendarService.modifyEvent(accessToken, calendar, event, updateAttendee,
+				notification);
+
+		EasyMock.verify(accessToken, helper, calendarDao, userService, eventChangeHandler);
+
+		Assert.assertEquals(ParticipationState.NEEDSACTION, newEvent.getAttendees().get(0)
+				.getState());
 	}
 
 	@Test
@@ -718,65 +843,6 @@ public class CalendarBindingImplTest {
 		Assert.assertEquals(false, afterExceptionAttendee.isCanWriteOnCalendar());
 	}
 
-	@Test
-	public void testAttendeeHasNoRightToWriteOnCalendar() throws FindException, ServerFault, SQLException, EventNotFoundException {
-		ObmUser defaultUser = ToolBox.getDefaultObmUser();
-		
-		String calendar = "cal1";
-		EventExtId extId = new EventExtId("extId");
-		boolean updateAttendee = true;
-		boolean notification = false;
-
-		Attendee attendee = ToolBox.getFakeAttendee(defaultUser.getEmail());
-		attendee.setState(ParticipationState.ACCEPTED);
-
-		Event beforeEvent = new Event();
-		beforeEvent.setType(EventType.VEVENT);
-		beforeEvent.setInternalEvent(true);
-		beforeEvent.setExtId(extId);
-		beforeEvent.setSequence(0);
-
-		Event event = new Event();
-		event.setType(EventType.VEVENT);
-		event.setInternalEvent(true);
-		event.setExtId(extId);
-		event.addAttendee(attendee);
-		event.setLocation("aLocation");
-		event.setSequence(1);
-
-		AccessToken accessToken = ToolBox.mockAccessToken(calendar, defaultUser.getDomain());
-		HelperService helper = mockRightsHelper(calendar, accessToken);
-		CalendarDao calendarDao = createMock(CalendarDao.class);
-		UserService userService = createMock(UserService.class);
-		EventChangeHandler eventChangeHandler = createMock(EventChangeHandler.class);
-
-		expect(userService.getUserFromCalendar(calendar, defaultUser.getDomain().getName())).andReturn(defaultUser)
-				.atLeastOnce();
-		expect(calendarDao.findEventByExtId(accessToken, defaultUser, event.getExtId())).andReturn(
-				beforeEvent).atLeastOnce();
-		expect(helper.canWriteOnCalendar(accessToken, attendee.getEmail())).andReturn(false)
-				.atLeastOnce();
-		expect(
-				calendarDao.modifyEventForcingSequence(accessToken, calendar, event,
-						updateAttendee, 1, true)).andReturn(event).atLeastOnce();
-		
-		eventChangeHandler.update(beforeEvent, event, notification, accessToken);
-		EasyMock.expectLastCall();
-		
-		EasyMock.replay(accessToken, helper, calendarDao, userService, eventChangeHandler);
-
-		CalendarBindingImpl calendarService = new CalendarBindingImpl(eventChangeHandler, null,
-				userService, calendarDao, null, helper, null, null);
-		Event newEvent = calendarService.modifyEvent(accessToken, calendar, event, updateAttendee,
-				notification);
-
-		EasyMock.verify(accessToken, helper, calendarDao, userService, eventChangeHandler);
-
-		Assert.assertEquals(ParticipationState.NEEDSACTION, newEvent.getAttendees().get(0)
-				.getState());
-	}
-
-	
 	@Test
 	public void testCreateAnEventExceptionAndUpdateItsStatusButNotTheParent() throws FindException, SQLException, EventNotFoundException, ServerFault {
 		ObmUser defaultUser = ToolBox.getDefaultObmUser();
@@ -1154,7 +1220,7 @@ public class CalendarBindingImplTest {
 	}
 
 	@Test(expected=ServerFault.class)
-	public void createNullEvent() throws ServerFault, EventAlreadyExistException {
+	public void testCreateNullEvent() throws ServerFault, EventAlreadyExistException {
 
 		ObmUser defaultObmUser = ToolBox.getDefaultObmUser();
 		String calendar = "cal1";
@@ -1171,7 +1237,7 @@ public class CalendarBindingImplTest {
 	}
 
 	@Test(expected=ServerFault.class)
-	public void createEventWithObmId() throws ServerFault, EventAlreadyExistException {
+	public void testCreateEventWithObmId() throws ServerFault, EventAlreadyExistException {
 		ObmUser defaultObmUser = ToolBox.getDefaultObmUser();
 		String calendar = "cal1";
 
@@ -1188,7 +1254,7 @@ public class CalendarBindingImplTest {
 	}
 
 	@Test(expected=EventAlreadyExistException.class)
-	public void createDuplicateEvent() throws ServerFault, EventAlreadyExistException, FindException {
+	public void testCreateDuplicateEvent() throws ServerFault, EventAlreadyExistException, FindException {
 		ObmUser defaultObmUser = ToolBox.getDefaultObmUser();
 		AccessToken accessToken = ToolBox.mockAccessToken(defaultObmUser.getLogin(), defaultObmUser.getDomain());
 		String calendar = "cal1";
@@ -1209,7 +1275,7 @@ public class CalendarBindingImplTest {
 	}
 
 	@Test(expected=ServerFault.class)
-	public void createUnauthorizedEventOnCalendar() throws ServerFault, EventAlreadyExistException, FindException {
+	public void testCreateUnauthorizedEventOnCalendar() throws ServerFault, EventAlreadyExistException, FindException {
 		ObmUser defaultObmUser = ToolBox.getDefaultObmUser();
 		AccessToken accessToken = ToolBox.mockAccessToken(defaultObmUser.getLogin(), defaultObmUser.getDomain());
 		String calendar = "cal1";
@@ -1237,16 +1303,14 @@ public class CalendarBindingImplTest {
 	}
 
 	@Test
-	public void createInternalEvent() throws EventNotFoundException, ServerFault, FindException, SQLException {
+	public void testCreateInternalEvent() throws EventNotFoundException, ServerFault, FindException, SQLException {
 		ObmUser defaultObmUser = ToolBox.getDefaultObmUser();
 		AccessToken accessToken = ToolBox.mockAccessToken(defaultObmUser.getLogin(), defaultObmUser.getDomain());
 		String calendar = "cal1";
 		Event internalEvent = new Event();
-		internalEvent.setInternalEvent(true);
 		internalEvent.setUid(new EventObmId(1));
 
 		Event expectedEvent = new Event();
-		expectedEvent.setInternalEvent(true);
 		expectedEvent.setUid(new EventObmId(1));
 
 		CalendarDao calendarDao = createMock(CalendarDao.class);
@@ -1340,7 +1404,7 @@ public class CalendarBindingImplTest {
 	}
 
 	@Test
-	public void testChangeParticipationStateWithRecurrentEvent() {
+	public void testChangeParticipationStateRecurrentEventWithException() {
 		ObmUser defaultObmUser = ToolBox.getDefaultObmUser();
 		AccessToken accessToken = ToolBox.mockAccessToken(defaultObmUser.getLogin(), defaultObmUser.getDomain());
 
@@ -1389,4 +1453,5 @@ public class CalendarBindingImplTest {
 		Assertions.assertThat(mccarthy.isCanWriteOnCalendar()).isEqualTo(false);
 		Assert.assertEquals(mccarthy.getState(), ParticipationState.NEEDSACTION);
 	}
+
 }
